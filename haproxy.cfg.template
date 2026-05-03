@@ -1,0 +1,44 @@
+global
+    log stdout format raw local0
+    maxconn 4096
+    daemon off
+
+defaults
+    log     global
+    mode    http
+    option  httplog
+    option  dontlognull
+    timeout connect     10s
+    timeout client      86400s
+    timeout server      86400s
+    timeout tunnel      86400s   # required for WebSocket / long-lived HTTP connections
+
+#--------------------------------------------------------------------
+# Health endpoint — no upstream hit
+#--------------------------------------------------------------------
+frontend healthz
+    bind *:8081
+    http-request return status 200 content-type "text/plain" string "ok\n"
+
+#--------------------------------------------------------------------
+# Main frontend
+#--------------------------------------------------------------------
+frontend http_in
+    bind *:80
+    default_backend upstream_http
+
+#--------------------------------------------------------------------
+# Upstream backend
+#--------------------------------------------------------------------
+backend upstream_http
+    option  http-server-close
+    option  forwardfor
+
+    # Rewrite Host header
+    http-request set-header Host ${PROXY_HOST}
+
+    # WebSocket passthrough — preserve Upgrade/Connection headers
+    http-request set-header Connection "upgrade" if { hdr(Upgrade) -i websocket }
+    http-request set-header Upgrade    "websocket" if { hdr(Upgrade) -i websocket }
+
+    server upstream ${UPSTREAM_HOST}:${UPSTREAM_PORT} check ${UPSTREAM_SERVER_OPTS}
